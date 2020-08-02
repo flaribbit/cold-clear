@@ -15,7 +15,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Build
-      run: cargo build --release
+      run: cd c-api && cargo build --release
     - name: Artifact
       uses: actions/upload-artifact@v1.0.0
       with:
@@ -23,20 +23,3 @@ jobs:
         path: |
           target/release/*.dll
           target/release/*.exe
-
-  build-android:
-      runs-on: windows-latest
-      steps:
-      - uses: actions/checkout@v2
-      - name: setup
-        run: |
-          cargo install cargo-ndk
-          rustup target add aarch64-linux-android armv7-linux-androideabi
-      - name: Build
-        run: cd c-api && cargo ndk --platform 21 --target armv7-linux-androideabi build --release
-      - name: Artifact
-        uses: actions/upload-artifact@v1.0.0
-        with:
-          name: files
-          path: |
-            target/armv7-linux-androideabi/*.so
