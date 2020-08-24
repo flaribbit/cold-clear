@@ -35,3 +35,29 @@ jobs:
       with:
         name: cold_clear_x86
         path: target/i686-pc-windows-msvc/release/cold_clear.dll
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build
+      run: cd c-api && cargo build --release
+    - name: Artifact
+      uses: actions/upload-artifact@v1.0.0
+      with:
+        name: cold_clear_linux
+        path: target/release/libcold_clear.so
+
+  build-linux-x86:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup
+      run: rustup target add i686-unknown-linux-musl
+    - name: Build
+      run: cd c-api && cargo build --release --target=i686-unknown-linux-musl
+    - name: Artifact
+      uses: actions/upload-artifact@v1.0.0
+      with:
+        name: cold_clear_linux_x86
+        path: target/i686-unknown-linux-musl/release/libcold_clear.so
