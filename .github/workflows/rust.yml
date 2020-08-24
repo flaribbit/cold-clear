@@ -19,5 +19,19 @@ jobs:
     - name: Artifact
       uses: actions/upload-artifact@v1.0.0
       with:
-        name: files
+        name: cold_clear
         path: target/release/cold_clear.dll
+
+  build-windows-x86:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup
+      run: rustup target add i686-pc-windows-msvc
+    - name: Build
+      run: cd c-api && cargo build --release --target=i686-pc-windows-msvc
+    - name: Artifact
+      uses: actions/upload-artifact@v1.0.0
+      with:
+        name: cold_clear_x86
+        path: target/i686-pc-windows-msvc/release/cold_clear.dll
