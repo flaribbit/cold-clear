@@ -165,7 +165,7 @@ fn lock_check(
     moves: InputList
 ) {
     let mut cells = piece.cells();
-    if cells.iter().all(|&(_, y)| y >= 20) {
+    if cells.iter().all(|&(_, y)| y >= 22) {
         return
     }
     cells.sort();
@@ -330,7 +330,7 @@ fn start(
     (FallingPiece {
         kind: libtetris::PieceState(p, r),
         x,
-        y: 19,
+        y: 20,
         tspin: TspinStatus::None
     }, InputList {
         movements: i.iter().copied().collect(),
