@@ -6,7 +6,10 @@ use std::fs::File;
 use battle::Battle;
 use libtetris::Controller;
 use gilrs::Gamepad;
-use game_util::glutin::VirtualKeyCode;
+use game_util::text::Alignment;
+use game_util::winit::event::VirtualKeyCode;
+use game_util::winit::event_loop::EventLoopProxy;
+use game_util::LocalExecutor;
 use crate::battle_ui::BattleUi;
 use crate::res::Resources;
 
@@ -47,12 +50,14 @@ impl ReplayGame {
 impl crate::State for ReplayGame {
     fn update(
         &mut self,
+        _el_proxy: &EventLoopProxy<Box<dyn crate::State>>,
+        _executor: &LocalExecutor,
         _log: &mut crate::LogFile,
         res: &mut Resources,
         _keys: &HashSet<VirtualKeyCode>,
         _p1: Option<Gamepad>,
         _p2: Option<Gamepad>
-    ) -> Option<Box<dyn crate::State>> {
+    ) {
         if self.start_delay == 0 {
             if let Some((p1_controller, p2_controller)) = self.updates.pop_front() {
                 let update = self.battle.update(p1_controller, p2_controller);
@@ -93,7 +98,6 @@ impl crate::State for ReplayGame {
         } else {
             self.start_delay -= 1;
         }
-        None
     }
 
     fn render(&mut self, res: &mut Resources) {
@@ -101,13 +105,13 @@ impl crate::State for ReplayGame {
             res.text.draw_text(
                 &format!("{}", self.start_delay / 60 + 1),
                 9.5, 12.25,
-                game_util::Alignment::Center,
+                Alignment::Center,
                 [0xFF; 4], 3.0, 0
             );
             res.text.draw_text(
                 &format!("{}", self.start_delay / 60 + 1),
                 29.5, 12.25,
-                game_util::Alignment::Center,
+                Alignment::Center,
                 [0xFF; 4], 3.0, 0
             );
         }

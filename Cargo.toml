@@ -8,5 +8,7 @@ members = [
     "opening-book",
     "c-api",
     "compare",
-    "optimizer"
+    "optimizer",
+    "opening-book/book-builder",
+    "opening-book/pc-gen"
 ]

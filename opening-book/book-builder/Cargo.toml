@@ -1,16 +1,14 @@
 [package]
-name = "c-api"
+name = "book-builder"
 version = "0.1.0"
 authors = ["MinusKelvin <mark.carlson@minuskelvin.net>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-name = "cold_clear"
-crate-type = ["cdylib", "staticlib"]
-
 [dependencies]
-cold-clear = { path = "../bot" }
-libtetris = { path = "../libtetris" }
-enumset = "1.0.4"
+opening-book = { path = "..", features = ["builder"] }
+libtetris = { path = "../../libtetris" }
+fumen = "0.1.1"
+permutator = "0.4.0"
+enumset = "1.0"

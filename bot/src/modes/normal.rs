@@ -5,7 +5,6 @@ use opening_book::Book;
 // use crate::tree::{ ChildData, TreeState, NodeId };
 use crate::dag::{ DagState, NodeId, ChildData };
 use crate::Options;
-pub use crate::moves::Move;
 use crate::evaluation::Evaluator;
 
 pub struct BotState<E: Evaluator> {
@@ -123,7 +122,7 @@ impl<E: Evaluator> BotState<E> {
         let mut book_move = None;
         if let Some(book) = book {
             if self.tree.board().column_heights().iter().all(|&h| h <= 10) {
-                book_move = book.suggest_move(self.tree.board()).first().copied();
+                book_move = book.suggest_move(self.tree.board());
             }
         }
         let mut picked = None;
@@ -131,6 +130,7 @@ impl<E: Evaluator> BotState<E> {
             for mv in &candidates {
                 if mv.mv.same_location(&book_move) {
                     picked = Some(mv.clone());
+                    break;
                 }
             }
         }
@@ -145,11 +145,10 @@ impl<E: Evaluator> BotState<E> {
             vec![]
         };
 
-        let info = match book_move {
-            Some(mv) => crate::Info::Book(BookInfo {
-                name: "".to_string()
-            }),
-            None => crate::Info::Normal(Info {
+        let info = if book_move.is_some() {
+            crate::Info::Book
+        } else {
+            crate::Info::Normal(Info {
                 nodes: if book_move.is_some() { 0 } else { self.tree.nodes() },
                 depth: if book_move.is_some() { 6 } else { self.tree.depth() as u32 },
                 original_rank: child.original_rank,
@@ -157,7 +156,7 @@ impl<E: Evaluator> BotState<E> {
             })
         };
 
-        let inputs = crate::moves::find_moves(
+        let inputs = find_moves(
             self.tree.board(),
             self.options.spawn_rule.spawn(child.mv.kind.0, self.tree.board()).unwrap(),
             self.options.mode
@@ -260,7 +259,7 @@ impl Thinker {
         spawned: FallingPiece,
         hold: bool
     ) {
-        for mv in crate::moves::find_moves(&board, spawned, self.options.mode) {
+        for mv in find_moves(&board, spawned, self.options.mode) {
             let can_be_hd = board.above_stack(&mv.location) &&
             board.column_heights().iter().all(|&y| y < 18);
             let mut result = board.clone();
@@ -288,9 +287,4 @@ pub struct Info {
     pub depth: u32,
     pub original_rank: u32,
     pub plan: Vec<(FallingPiece, LockResult)>
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
-pub struct BookInfo {
-    pub name: String
 }

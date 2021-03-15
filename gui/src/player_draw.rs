@@ -1,5 +1,5 @@
 use game_util::prelude::*;
-use game_util::Alignment;
+use game_util::text::Alignment;
 use std::collections::VecDeque;
 use libtetris::*;
 use battle::{ PlayerUpdate, Event };
@@ -255,12 +255,12 @@ impl PlayerDrawState {
                     lines.push(("Nodes", format!("{}", info.nodes)));
                     lines.push(("O. Rank", format!("{}", info.original_rank)));
                 }
-                cold_clear::Info::Book(info) => {
+                cold_clear::Info::Book => {
                     lines.push(("Book", "".to_owned()));
-                    lines.push(("", info.name.clone()));
                 }
                 cold_clear::Info::PcLoop(info) => {
                     lines.push(("PC Loop", "".to_owned()));
+                    #[cfg(not(target_arch = "wasm32"))]
                     lines.push(("Depth", format!("{}", info.depth)));
                 }
             }
@@ -292,7 +292,7 @@ impl PlayerDrawState {
             for (placement, lock) in info.plan() {
                 for &(x, y, d) in &placement.cells_with_connections() {
                     res.sprite_batch.draw(
-                        &res.sprites.plan[d.to_bits() as usize],
+                        &res.sprites.plan[d.as_usize()],
                         point2(offset_x + x as f32 + 4.0, y_map[y as usize] as f32 + 3.25),
                         cell_color_to_color(placement.kind.0.color())
                     );

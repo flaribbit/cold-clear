@@ -2,11 +2,10 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{ AtomicBool, Ordering };
 use arrayvec::ArrayVec;
-use libtetris::{ Piece, RotationState, PieceState, TspinStatus, FallingPiece, Board, LockResult };
+use libtetris::{ Piece, FallingPiece, Board, LockResult, MovementMode };
 use crossbeam_channel::{ Sender, unbounded };
 use serde::{ Serialize, Deserialize };
 use crate::Move;
-use crate::moves::MovementMode;
 
 pub struct PcLooper {
     current_pc: VecDeque<(Move, LockResult)>,
@@ -15,17 +14,19 @@ pub struct PcLooper {
     next_pc_queue: VecDeque<Piece>,
     next_pc_hold: Option<Piece>,
     hold_enabled: bool,
-    solving: bool
+    solving: bool,
+    priority: PcPriority
 }
 
 pub struct PcSolver {
     abort: Arc<AtomicBool>,
     queue: ArrayVec<[pcf::Piece; 11]>,
-    hold_enabled: bool
+    hold_enabled: bool,
+    priority: PcPriority
 }
 
 impl PcLooper {
-    pub fn new(board: Board, hold_enabled: bool, mode: MovementMode) -> Self {
+    pub fn new(board: Board, hold_enabled: bool, mode: MovementMode, priority: PcPriority) -> Self {
         PcLooper {
             current_pc: VecDeque::new(),
             abort: Arc::new(AtomicBool::new(false)),
@@ -33,7 +34,7 @@ impl PcLooper {
             next_pc_hold: if hold_enabled { board.hold_piece } else { None },
             hold_enabled,
             solving: false,
-            mode
+            mode, priority
         }
     }
 
@@ -44,15 +45,7 @@ impl PcLooper {
 
         let mut queue = ArrayVec::new();
         for &piece in self.next_pc_hold.iter().chain(self.next_pc_queue.iter()).take(11) {
-            queue.push(match piece {
-                Piece::I => pcf::Piece::I,
-                Piece::S => pcf::Piece::S,
-                Piece::Z => pcf::Piece::Z,
-                Piece::O => pcf::Piece::O,
-                Piece::T => pcf::Piece::T,
-                Piece::L => pcf::Piece::L,
-                Piece::J => pcf::Piece::J
-            });
+            queue.push(piece.into());
         }
 
         if !self.hold_enabled && queue.len() >= 10 || queue.len() >= 11 {
@@ -60,7 +53,8 @@ impl PcLooper {
             Some(PcSolver {
                 abort: self.abort.clone(),
                 queue,
-                hold_enabled: self.hold_enabled
+                hold_enabled: self.hold_enabled,
+                priority: self.priority
             })
         } else {
             None
@@ -77,19 +71,15 @@ impl PcLooper {
             let mut next_pc_hold = self.next_pc_hold;
             let mut next_pc_queue = self.next_pc_queue.clone();
             for &placement in &soln {
-                let placements = crate::moves::find_moves(
+                let placements = libtetris::find_moves(
                     &b,
                     libtetris::SpawnRule::Row19Or20.spawn(placement.kind.0, &b).unwrap(),
                     self.mode
                 );
 
-                let mut target_cells = placement.cells();
-                target_cells.sort();
                 let mut mv = None;
                 for p in placements {
-                    let mut cells = p.location.cells();
-                    cells.sort();
-                    if cells == target_cells {
+                    if p.location.same_location(&placement) {
                         match &mv {
                             None => mv = Some(p),
                             Some(candidate) => if p.inputs.time < candidate.inputs.time {
@@ -171,35 +161,38 @@ impl PcSolver {
                 let soln: ArrayVec<[_; 10]> = soln.iter().copied().collect();
                 let mut score = PcScore::default();
                 let mut b = pcf::BitBoard(0);
-                let mut prev_cleared = 0;
+                let mut prev_full = 0;
                 for &placement in &soln[..soln.len()-1] {
                     if !pcf::placeability::hard_drop_only(b, placement) {
                         score.long_delays += 1;
                     }
                     b = b.combine(placement.board());
-                    let mut cleared = 0;
+                    let mut full = 0;
                     for y in 0..4 {
                         if b.line_filled(y) {
-                            cleared += 1;
+                            full += 1;
                         }
                     }
-                    if cleared != prev_cleared {
+                    if full != prev_full {
                         score.long_delays += 1;
                     }
-                    if cleared - prev_cleared == 2 {
-                        score.attack += 1;
+                    let lines_cleared = full - prev_full;
+                    let tspin = check_tspin(placement, b);
+                    match (lines_cleared, tspin) {
+                        (1, true) => score.attack += 2,
+                        (2, false) => score.attack += 1,
+                        (2, true) => score.attack += 4,
+                        (3, false) => score.attack += 2,
+                        _ => {}
                     }
-                    if cleared - prev_cleared == 3 {
-                        score.attack += 2;
-                    }
-                    prev_cleared = cleared;
+                    prev_full = full;
                 }
                 if !pcf::placeability::hard_drop_only(b, *soln.last().unwrap()) {
                     score.last_placement_long = true;
                 }
                 match *best {
                     None => *best = Some((soln, score)),
-                    Some((_, s)) => if score > s {
+                    Some((_, s)) => if self.priority.cmp(score, s) == std::cmp::Ordering::Greater {
                         *best = Some((soln, score));
                     }
                 }
@@ -211,7 +204,7 @@ impl PcSolver {
             if let Some((soln, score)) = candidate {
                 match best {
                     None => best = Some((soln, score)),
-                    Some((_, s)) => if score > s {
+                    Some((_, s)) => if self.priority.cmp(score, s) == std::cmp::Ordering::Greater {
                         best = Some((soln, score))
                     }
                 }
@@ -223,25 +216,7 @@ impl PcSolver {
             let mut b = pcf::BitBoard(0);
             for &placement in &soln {
                 let piece = placement.srs_piece(b)[0];
-                result.push(FallingPiece {
-                    kind: PieceState(match piece.piece {
-                        pcf::Piece::I => Piece::I,
-                        pcf::Piece::J => Piece::J,
-                        pcf::Piece::L => Piece::L,
-                        pcf::Piece::S => Piece::S,
-                        pcf::Piece::Z => Piece::Z,
-                        pcf::Piece::T => Piece::T,
-                        pcf::Piece::O => Piece::O,
-                    }, match piece.rotation {
-                        pcf::Rotation::North => RotationState::North,
-                        pcf::Rotation::South => RotationState::South,
-                        pcf::Rotation::West => RotationState::West,
-                        pcf::Rotation::East => RotationState::East,
-                    }),
-                    x: piece.x,
-                    y: piece.y,
-                    tspin: TspinStatus::None
-                });
+                result.push(piece.into());
                 b = b.combine(placement.board());
             }
             result
@@ -249,18 +224,25 @@ impl PcSolver {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, Default)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 struct PcScore {
     long_delays: u32,
     last_placement_long: bool,
     attack: u32
 }
 
-impl PartialOrd for PcScore {
-    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.long_delays.cmp(&rhs.long_delays).reverse()
-            .then(self.last_placement_long.cmp(&rhs.last_placement_long).reverse())
-            .then(self.attack.cmp(&rhs.attack)))
+impl PcPriority {
+    fn cmp(self, lhs: PcScore, rhs: PcScore) -> std::cmp::Ordering {
+        match self {
+            PcPriority::Fastest =>
+                lhs.long_delays.cmp(&rhs.long_delays).reverse()
+                    .then(lhs.last_placement_long.cmp(&rhs.last_placement_long).reverse())
+                    .then(lhs.attack.cmp(&rhs.attack)),
+            PcPriority::HighestAttack =>
+                lhs.attack.cmp(&rhs.attack)
+                    .then(lhs.long_delays.cmp(&rhs.long_delays).reverse())
+                    .then(lhs.last_placement_long.cmp(&rhs.last_placement_long).reverse())
+        }
     }
 }
 
@@ -296,4 +278,55 @@ impl<T> Drop for SendOnDrop<T> {
 pub struct Info {
     pub depth: u32,
     pub plan: Vec<(FallingPiece, LockResult)>
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub enum PcPriority {
+    Fastest,
+    HighestAttack,
+}
+
+fn check_tspin(p: pcf::Placement, b: pcf::BitBoard) -> bool {
+    let x = p.x as usize;
+    // only doing data entry for 4-line PCs since that's all pc loop mode should ever do
+    match p.kind {
+        // south states
+        pcf::PieceState::TSouth00 =>
+            b.cell_filled(x, 0) && b.cell_filled(x + 2, 0) && if b.line_filled(2) {
+                !b.line_filled(3) && (b.cell_filled(x, 3) || b.cell_filled(x + 2, 3))
+            } else {
+                b.cell_filled(x, 2) || b.cell_filled(x + 2, 2)
+            },
+        pcf::PieceState::TSouth01 =>
+            b.cell_filled(x, 0) && b.cell_filled(x + 2, 0)
+            && !b.line_filled(3) && (b.cell_filled(x, 3) || b.cell_filled(x + 2, 3)),
+        pcf::PieceState::TSouth10 =>
+            b.cell_filled(x, 1) && b.cell_filled(x + 2, 1)
+            && !b.line_filled(3) && (b.cell_filled(x, 3) || b.cell_filled(x + 2, 3)),
+
+        // east states
+        pcf::PieceState::TEast000 =>
+            b.cell_filled(x + 1, 0) && b.cell_filled(x + 1, 2)
+            && (x == 0 || b.cell_filled(x - 1, 0) || b.cell_filled(x - 1, 2)),
+        pcf::PieceState::TEast001 | pcf::PieceState::TEast010 =>
+            b.cell_filled(x + 1, 0) && b.cell_filled(x + 1, 3)
+            && (x == 0 || b.cell_filled(x - 1, 0) || b.cell_filled(x - 1, 3)),
+        pcf::PieceState::TEast100 =>
+            b.cell_filled(x + 1, 1) && b.cell_filled(x + 1, 3)
+            && (x == 0 || b.cell_filled(x - 1, 1) || b.cell_filled(x - 1, 3)),
+
+        // west states
+        pcf::PieceState::TWest000 =>
+            b.cell_filled(x, 0) && b.cell_filled(x, 2)
+            && (x == 8 || b.cell_filled(x + 2, 0) || b.cell_filled(x + 2, 2)),
+        pcf::PieceState::TWest001 | pcf::PieceState::TWest010 =>
+            b.cell_filled(x, 0) && b.cell_filled(x, 3)
+            && (x == 8 || b.cell_filled(x + 2, 0) || b.cell_filled(x + 2, 3)),
+        pcf::PieceState::TWest100 =>
+            b.cell_filled(x, 1) && b.cell_filled(x, 3)
+            && (x == 8 || b.cell_filled(x + 2, 1) || b.cell_filled(x + 2, 3)),
+
+        // otherwise
+        _ => false
+    }
 }

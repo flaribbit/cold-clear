@@ -1,8 +1,9 @@
 use libtetris::*;
 use std::io::prelude::*;
+use opening_book::BookBuilder;
 
 fn main() {
-    let mut book = opening_book::Book::new();
+    let mut book = BookBuilder::new();
 
     for l in std::io::BufReader::new(std::io::stdin()).lines() {
         let fumen = match fumen::Fumen::decode(&l.unwrap()) {
@@ -78,7 +79,7 @@ fn main() {
                     book.add_move(&b, p, None);
                     b.add_next_piece(p.kind.0);
                     b.advance_queue();
-                    offset += b.lock_piece(dbg!(p)).cleared_lines.len() as i32;
+                    offset += b.lock_piece(p).cleared_lines.len() as i32;
                 }
             }
         }
@@ -86,13 +87,21 @@ fn main() {
 
     let t = std::time::Instant::now();
     book.recalculate_graph();
-    println!("{:?}", t.elapsed());
+    println!("Took {:?} to calculate", t.elapsed());
 
     dbg!(book.value_of_position(Board::new().into()));
 
-    book.save_to(std::fs::File::create("book.ccbook").unwrap()).unwrap();
-
+    let t = std::time::Instant::now();
     dump(&book);
+    println!("Took {:?} to dump info to ./book/", t.elapsed());
+
+    let t = std::time::Instant::now();
+    let compiled = book.compile(&[Board::new().into()]);
+    println!("Took {:?} to compile", t.elapsed());
+
+    compiled.save(
+        std::fs::File::create("book.ccbook").unwrap()
+    ).unwrap();
 }
 
 fn convert(p: fumen::Piece) -> FallingPiece {
@@ -164,7 +173,7 @@ fn mirror_placement(p: FallingPiece) -> FallingPiece {
     }
 }
 
-fn dump(book: &opening_book::Book) {
+fn dump(book: &opening_book::BookBuilder) {
     fn name(pos: opening_book::Position) -> String {
         let mut s = String::new();
         for &r in pos.rows() {
@@ -214,13 +223,13 @@ fn dump(book: &opening_book::Book) {
         }
         write!(f, "<p>").unwrap();
         let mut moves: Vec<_> = book.moves(pos).into_iter()
-            .map(|mv| (mv, book.value_of_position(pos.advance(mv.location).0)))
+            .map(|mv| (mv, book.value_of_position(pos.advance(mv.location()).0)))
             .collect();
         moves.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap().reverse());
         for (mv, v) in moves {
-            let cells = mv.location.cells();
-            write!(f, "<a href='{}.html'>", name(pos.advance(mv.location).0)).unwrap();
-            match mv.value {
+            let cells = mv.location().cells();
+            write!(f, "<a href='{}.html'>", name(pos.advance(mv.location()).0)).unwrap();
+            match mv.value() {
                 Some(v) => write!(f, "V={}", v).unwrap(),
                 None => {
                     write!(f, "E(V)={:.5}", v.value).unwrap();
@@ -236,7 +245,7 @@ fn dump(book: &opening_book::Book) {
                         if pos.rows()[y] & 1<<x != 0 {
                             "gray"
                         } else if cells.contains(&(x, y as i32)) {
-                            match mv.location.kind.0 {
+                            match mv.location().kind.0 {
                                 Piece::I => "cyan",
                                 Piece::J => "blue",
                                 Piece::L => "orange",
@@ -254,14 +263,16 @@ fn dump(book: &opening_book::Book) {
             }
             write!(f, "</table></a> ").unwrap();
         }
-        // for (next, b) in pos.next_possibilities() {
-        //     for (queue, bag) in opening_book::possible_sequences(vec![], b) {
-        //         let v = book.value_of_raw(pos, next, &queue, bag);
-        //         if v == Default::default() {
-        //             write!(f, "<p>({:?}){:?} = {:?}", next, queue, v).unwrap();
-        //         }
-        //     }
-        // }
+        if pos.bag() == enumset::EnumSet::all() {
+            for (next, b) in pos.next_possibilities() {
+                for (queue, bag) in opening_book::possible_sequences(vec![], b) {
+                    let v = book.value_of_raw(pos, next, &queue, bag);
+                    if v == Default::default() {
+                        write!(f, "<p>({:?}){:?} = {:?}", next, queue, v).unwrap();
+                    }
+                }
+            }
+        }
         write!(f, "</body></html>").unwrap();
     }
 }

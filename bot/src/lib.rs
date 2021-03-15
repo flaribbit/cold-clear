@@ -5,7 +5,6 @@ pub use opening_book::Book;
 extern crate rental;
 
 pub mod evaluation;
-pub mod moves;
 mod modes;
 mod dag;
 
@@ -20,17 +19,17 @@ mod web;
 pub use web::Interface;
 
 use libtetris::*;
-pub use crate::moves::Move;
 pub use crate::modes::normal::{ BotState, ThinkResult, Thinker };
+pub use crate::modes::pcloop::PcPriority;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Options {
-    pub mode: crate::moves::MovementMode,
+    pub mode: MovementMode,
     pub spawn_rule: SpawnRule,
     pub use_hold: bool,
     pub speculate: bool,
-    pub pcloop: bool,
+    pub pcloop: Option<modes::pcloop::PcPriority>,
     pub min_nodes: u32,
     pub max_nodes: u32,
     pub threads: u32
@@ -52,7 +51,7 @@ enum BotMsg {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub enum Info {
     Normal(modes::normal::Info),
-    Book(modes::normal::BookInfo),
+    Book,
     PcLoop(modes::pcloop::Info)
 }
 
@@ -61,7 +60,7 @@ impl Info {
         match self {
             Info::Normal(info) => &info.plan,
             Info::PcLoop(info) => &info.plan,
-            Info::Book(_) => &[]
+            Info::Book => &[]
         }
     }
 }
@@ -75,11 +74,11 @@ pub enum BotPollState {
 impl Default for Options {
     fn default() -> Self {
         Options {
-            mode: crate::moves::MovementMode::ZeroG,
+            mode: MovementMode::ZeroG,
             spawn_rule: SpawnRule::Row19Or20,
             use_hold: true,
             speculate: true,
-            pcloop: false,
+            pcloop: None,
             min_nodes: 0,
             max_nodes: 4_000_000_000,
             threads: 1
